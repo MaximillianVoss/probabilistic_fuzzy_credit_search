@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from urllib.request import urlopen
 
-import numpy as np
 import pandas as pd
+
+from src.search_analysis import DatasetAnalysis, run_analysis
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data" / "credit_card_default"
@@ -23,6 +23,7 @@ QUERY_PERTURBATION = {
     "age": 1.05,
     "pay_amt1": 1.10,
 }
+WEIGHTS = {"limit_bal": 1.5, "age": 1.0, "pay_amt1": 1.0}
 
 COLUMN_RENAME_MAP = {
     "LIMIT_BAL": "limit_bal",
@@ -70,188 +71,55 @@ def load_dataset() -> tuple[pd.DataFrame, str]:
     return standardize_columns(frame), xls_path.name
 
 
-def prepare_numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    prepared = frame[FEATURE_COLUMNS].apply(pd.to_numeric, errors="coerce")
-    prepared = prepared.dropna().reset_index(drop=True)
-    return prepared
-
-
-def min_max_normalize(frame: pd.DataFrame) -> pd.DataFrame:
-    mins = frame.min()
-    spans = (frame.max() - mins).replace(0, 1)
-    return (frame - mins) / spans
-
-
-def build_query(frame: pd.DataFrame, seed: int = 42) -> tuple[int, dict[str, float]]:
-    if frame.empty:
-        raise ValueError("После подготовки не осталось строк для построения запроса.")
-
-    rng = np.random.default_rng(seed)
-    row_index = int(rng.integers(0, len(frame)))
-    source_row = frame.iloc[row_index]
-    query = {
-        feature: float(source_row[feature]) * QUERY_PERTURBATION[feature]
-        for feature in FEATURE_COLUMNS
-    }
-    return row_index, query
-
-
-def relative_difference(value: float, query_value: float, eps: float = 1e-9) -> float:
-    return abs(value - query_value) / max(abs(query_value), eps)
-
-
-def baseline_score(row: pd.Series, query: dict[str, float]) -> float:
-    deltas = [relative_difference(row[column], query[column]) for column in query]
-    return float(np.exp(-sum(deltas)))
-
-
-def baseline_search(frame: pd.DataFrame, query: dict[str, float], top_k: int = 10) -> pd.DataFrame:
-    result = frame.copy()
-    result["score"] = result.apply(lambda row: baseline_score(row, query), axis=1)
-    return result.sort_values("score", ascending=False).head(top_k).reset_index(drop=True)
-
-
-def filter_candidates(
-    frame: pd.DataFrame,
-    query: dict[str, float],
-    relative_window: float = 0.20,
-    minimum_span: float = 100.0,
-) -> pd.DataFrame:
-    filtered = frame.copy()
-    for column, query_value in query.items():
-        span = max(abs(query_value) * relative_window, minimum_span)
-        left = query_value - span
-        right = query_value + span
-        filtered = filtered[(filtered[column] >= left) & (filtered[column] <= right)]
-    return filtered
-
-
-def proposed_score(
-    row: pd.Series,
-    query: dict[str, float],
-    weights: dict[str, float] | None = None,
-    alpha: float = 3.0,
-) -> float:
-    if weights is None:
-        weights = {column: 1.0 for column in query}
-
-    score = 0.0
-    for column in query:
-        distance = relative_difference(row[column], query[column])
-        score += weights[column] * np.exp(-alpha * distance)
-    return float(score)
-
-
-def proposed_search(
-    frame: pd.DataFrame,
-    query: dict[str, float],
-    top_k: int = 10,
-    relative_window: float = 0.20,
-    weights: dict[str, float] | None = None,
-    alpha: float = 3.0,
-) -> tuple[pd.DataFrame, int]:
-    candidates = filter_candidates(frame, query, relative_window=relative_window)
-    if candidates.empty:
-        return candidates.copy(), 0
-
-    ranked = candidates.copy()
-    ranked["score"] = ranked.apply(
-        lambda row: proposed_score(row, query, weights=weights, alpha=alpha),
-        axis=1,
+def analyze_dataset() -> DatasetAnalysis:
+    frame, source_name = load_dataset()
+    return run_analysis(
+        dataset_name="Credit Card Default Dataset",
+        frame=frame,
+        source_name=source_name,
+        feature_columns=FEATURE_COLUMNS,
+        query_perturbation=QUERY_PERTURBATION,
+        weights=WEIGHTS,
+        relative_window=0.20,
+        alpha=3.0,
+        top_k=5,
+        repeats=20,
+        target_column="default_next_month",
+        minimum_span=100.0,
     )
-    ranked = ranked.sort_values("score", ascending=False).head(top_k).reset_index(drop=True)
-    return ranked, len(candidates)
-
-
-def measure_time(function, *args, repeats: int = 30, **kwargs) -> tuple[float, float]:
-    timings = []
-    for _ in range(repeats):
-        start = time.perf_counter()
-        function(*args, **kwargs)
-        timings.append(time.perf_counter() - start)
-    return float(np.mean(timings)), float(np.std(timings))
 
 
 def run_demo() -> None:
-    frame, source_name = load_dataset()
-    numeric_frame = prepare_numeric_frame(frame)
-    normalized_frame = min_max_normalize(numeric_frame)
-    row_index, query = build_query(numeric_frame)
+    analysis = analyze_dataset()
 
-    print(f"Источник данных: {source_name}")
-    print(f"Размер исходного датасета: {frame.shape}")
-    print(f"Размер рабочей выборки: {numeric_frame.shape}")
-    if "default_next_month" in frame.columns:
+    print(f"Источник данных: {analysis.source_name}")
+    print(f"Размер исходного датасета: {analysis.raw_shape}")
+    print(f"Размер рабочей выборки: {analysis.numeric_shape}")
+    if analysis.target_distribution is not None:
         print("\nРаспределение целевого признака:")
-        print(frame["default_next_month"].value_counts(dropna=False).to_string())
+        print(analysis.target_distribution.to_string(index=False))
 
     print("\nМинимум и максимум по признакам:")
-    summary = pd.DataFrame({"min": numeric_frame.min(), "max": numeric_frame.max()})
-    print(summary.to_string())
+    print(analysis.feature_summary.to_string(index=False))
 
-    print(f"\nСлучайная запись для запроса: {row_index}")
+    print(f"\nСлучайная запись для запроса: {analysis.row_index}")
     print("Неточный запрос:")
-    print(query)
-
-    baseline_result = baseline_search(numeric_frame, query, top_k=5)
-    proposed_result, candidate_count = proposed_search(
-        numeric_frame,
-        query,
-        top_k=5,
-        relative_window=0.20,
-        weights={"limit_bal": 1.5, "age": 1.0, "pay_amt1": 1.0},
-        alpha=3.0,
-    )
-
-    baseline_mean, baseline_std = measure_time(
-        baseline_search,
-        numeric_frame,
-        query,
-        top_k=5,
-        repeats=20,
-    )
-    proposed_mean, proposed_std = measure_time(
-        proposed_search,
-        numeric_frame,
-        query,
-        top_k=5,
-        relative_window=0.20,
-        weights={"limit_bal": 1.5, "age": 1.0, "pay_amt1": 1.0},
-        alpha=3.0,
-        repeats=20,
-    )
+    print(analysis.query)
 
     print("\nTop-5 базового метода:")
-    print(baseline_result.to_string(index=False))
+    print(analysis.baseline_result.to_string(index=False))
 
     print("\nTop-5 ускоренного метода:")
-    if proposed_result.empty:
+    if analysis.proposed_result.empty:
         print("Нет кандидатов при текущем окне фильтрации.")
     else:
-        print(proposed_result.to_string(index=False))
+        print(analysis.proposed_result.to_string(index=False))
 
     print("\nСравнение времени:")
-    print(
-        pd.DataFrame(
-            [
-                {
-                    "method": "baseline",
-                    "mean_seconds": baseline_mean,
-                    "std_seconds": baseline_std,
-                    "processed_rows": len(numeric_frame),
-                },
-                {
-                    "method": "proposed",
-                    "mean_seconds": proposed_mean,
-                    "std_seconds": proposed_std,
-                    "processed_rows": candidate_count,
-                },
-            ]
-        ).to_string(index=False)
-    )
+    print(analysis.time_comparison.to_string(index=False))
 
     print("\nПример нормализованных признаков:")
-    print(normalized_frame.head().to_string(index=False))
+    print(analysis.normalized_frame.head().to_string(index=False))
 
 
 if __name__ == "__main__":
