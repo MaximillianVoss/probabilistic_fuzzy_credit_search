@@ -2,11 +2,13 @@
 
 Стартовый проект под PyCharm по теме: ускорение неточного поиска в БД на основе вероятностных соотношений.
 
-В проекте есть GUI-приложение и два отдельных сценария анализа:
+В проекте есть GUI-приложение и пакет с аналитическими датасетами:
 
 - `main.py` запускает оконное приложение с вкладками, таблицами и графиками
-- `src/german_credit_search.py` для `German Credit Dataset`
-- `src/credit_card_default_search.py` для `Credit Card Default Dataset`
+- `src/datasets/base.py` содержит базовый класс `AnalyticalDataset` и общую аналитику
+- `src/datasets/german_credit.py` для `German Credit Dataset`
+- `src/datasets/credit_card_default.py` для `Credit Card Default Dataset`
+- `src/gui/app.py`, `src/gui/dataset_tab.py`, `src/gui/theme.py` отвечают за интерфейс
 
 Что уже подготовлено:
 
@@ -36,4 +38,4 @@
 2. Создать виртуальное окружение.
 3. Установить зависимости: `pip install -r requirements.txt`
 4. Для визуального режима запускать `main.py`.
-5. При необходимости можно отдельно запускать сценарии из папки `src`.
+5. При необходимости можно импортировать конкретные классы датасетов из `src/datasets`.

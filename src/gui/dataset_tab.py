@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 from typing import Callable
 
 import matplotlib
+
 matplotlib.use("TkAgg")
 
 import numpy as np
@@ -13,18 +14,8 @@ import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from src.credit_card_default_search import analyze_dataset as analyze_credit_card_default
-from src.german_credit_search import analyze_dataset as analyze_german_credit
-from src.search_analysis import DatasetAnalysis
-
-BACKGROUND = "#f5f7fb"
-SURFACE = "#ffffff"
-PRIMARY = "#214f8b"
-SECONDARY = "#5c7aa3"
-ACCENT = "#d96c3f"
-TEXT = "#1b2430"
-MUTED = "#6d7a8c"
-GRID = "#dfe6f1"
+from ..datasets.base import DatasetAnalysis
+from .theme import ACCENT, GRID, PRIMARY, SECONDARY, SURFACE, TEXT
 
 
 def format_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
@@ -119,7 +110,11 @@ class DatasetTab(ttk.Frame):
 
         self.target_frame = ttk.LabelFrame(parent, text="Целевой признак", padding=10)
         self.target_frame.pack(fill="both", expand=True)
-        self.target_tree = self._create_tree(self.target_frame, ("value", "count"), [("value", "Значение"), ("count", "Частота")])
+        self.target_tree = self._create_tree(
+            self.target_frame,
+            ("value", "count"),
+            [("value", "Значение"), ("count", "Частота")],
+        )
 
     def _metric_card(
         self,
@@ -273,8 +268,18 @@ class DatasetTab(ttk.Frame):
         self.query_row_var.set(f"Индекс запроса: {analysis.row_index}")
         self.candidates_var.set(f"{analysis.candidate_count:,}".replace(",", " "))
 
-        baseline_time = float(analysis.time_comparison.loc[analysis.time_comparison["method"] == "baseline", "mean_seconds"].iloc[0])
-        proposed_time = float(analysis.time_comparison.loc[analysis.time_comparison["method"] == "proposed", "mean_seconds"].iloc[0])
+        baseline_time = float(
+            analysis.time_comparison.loc[
+                analysis.time_comparison["method"] == "baseline",
+                "mean_seconds",
+            ].iloc[0]
+        )
+        proposed_time = float(
+            analysis.time_comparison.loc[
+                analysis.time_comparison["method"] == "proposed",
+                "mean_seconds",
+            ].iloc[0]
+        )
         self.baseline_time_var.set(f"{baseline_time:.5f} c")
         self.proposed_time_var.set(f"{proposed_time:.5f} c")
 
@@ -367,84 +372,3 @@ class DatasetTab(ttk.Frame):
         self.chart_canvas = FigureCanvasTkAgg(figure, master=self.chart_host)
         self.chart_canvas.draw()
         self.chart_canvas.get_tk_widget().pack(fill="both", expand=True)
-
-
-class CreditSearchApp:
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.root.title("Probabilistic Fuzzy Credit Search")
-        self.root.geometry("1520x920")
-        self.root.minsize(1280, 780)
-        self.root.configure(bg=BACKGROUND)
-
-        self._configure_style()
-        self._build_root()
-
-    def _configure_style(self) -> None:
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-
-        style.configure("App.TFrame", background=BACKGROUND)
-        style.configure("Card.TFrame", background=SURFACE, relief="flat")
-        style.configure("Metric.TFrame", background="#eef3fa")
-        style.configure("Title.TLabel", background=BACKGROUND, foreground=TEXT, font=("Segoe UI", 20, "bold"))
-        style.configure("Subtitle.TLabel", background=BACKGROUND, foreground=MUTED, font=("Segoe UI", 10))
-        style.configure("HeroTitle.TLabel", background=SURFACE, foreground=TEXT, font=("Segoe UI", 20, "bold"))
-        style.configure("HeroSubtitle.TLabel", background=SURFACE, foreground=MUTED, font=("Segoe UI", 10))
-        style.configure("Status.TLabel", background=BACKGROUND, foreground=PRIMARY, font=("Segoe UI", 10, "italic"))
-        style.configure("Body.TLabel", background=SURFACE, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("CardCaption.TLabel", background="#eef3fa", foreground=MUTED, font=("Segoe UI", 9))
-        style.configure("MetricValue.TLabel", background="#eef3fa", foreground=TEXT, font=("Segoe UI", 16, "bold"))
-
-        style.configure("TLabelFrame", background=SURFACE, foreground=TEXT, font=("Segoe UI", 10, "bold"))
-        style.configure("TLabelFrame.Label", background=SURFACE, foreground=TEXT)
-        style.configure("TNotebook", background=BACKGROUND, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(14, 8), font=("Segoe UI", 10, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", SURFACE), ("active", "#eaf0f8")])
-        style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT, rowheight=28)
-        style.configure("Treeview.Heading", background="#e8eef8", foreground=TEXT, font=("Segoe UI", 9, "bold"))
-        style.map("Treeview", background=[("selected", "#d8e4f6")], foreground=[("selected", TEXT)])
-        style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=(12, 8))
-
-    def _build_root(self) -> None:
-        wrapper = ttk.Frame(self.root, style="App.TFrame", padding=18)
-        wrapper.pack(fill="both", expand=True)
-
-        hero = ttk.Frame(wrapper, style="Card.TFrame", padding=18)
-        hero.pack(fill="x", pady=(0, 16))
-        ttk.Label(hero, text="Система анализа неточного поиска в кредитных данных", style="HeroTitle.TLabel").pack(
-            anchor="w"
-        )
-        ttk.Label(
-            hero,
-            text="Интерфейс под PyCharm: отдельные вкладки по датасетам, таблицы результатов и графики без вывода в консоль.",
-            style="HeroSubtitle.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
-
-        notebook = ttk.Notebook(wrapper)
-        notebook.pack(fill="both", expand=True)
-
-        notebook.add(
-            DatasetTab(
-                notebook,
-                title="German Credit Dataset",
-                subtitle="Набор для сравнения базового и ускоренного поиска по возрасту, сумме кредита и сроку.",
-                loader=analyze_german_credit,
-            ),
-            text="German Credit",
-        )
-        notebook.add(
-            DatasetTab(
-                notebook,
-                title="Credit Card Default Dataset",
-                subtitle="Вкладка для анализа кредитных лимитов, возраста и первого платежа по карте.",
-                loader=analyze_credit_card_default,
-            ),
-            text="Credit Card Default",
-        )
-
-
-def launch_app() -> None:
-    root = tk.Tk()
-    CreditSearchApp(root)
-    root.mainloop()
