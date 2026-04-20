@@ -8,6 +8,7 @@
 - `src/datasets/base.py` содержит базовый класс `AnalyticalDataset` и общую аналитику
 - `src/datasets/german_credit.py` для `German Credit Dataset`
 - `src/datasets/credit_card_default.py` для `Credit Card Default Dataset`
+- `src/datasets/credit_approval.py` для `Credit Approval Dataset`
 - `src/gui/app.py`, `src/gui/dataset_tab.py`, `src/gui/theme.py` отвечают за интерфейс
 
 Что уже подготовлено:
@@ -29,6 +30,7 @@
 
 - `data/german_credit/german_credit_data.csv`
 - `data/credit_card_default/UCI_Credit_Card.csv`
+- `data/credit_approval/crx.data`
 
 Тогда скрипты автоматически возьмут локальные файлы вместо UCI-источников.
 

@@ -3,7 +3,11 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from ..datasets import analyze_credit_card_default, analyze_german_credit
+from ..datasets import (
+    analyze_credit_approval,
+    analyze_credit_card_default,
+    analyze_german_credit,
+)
 from .dataset_tab import DatasetTab
 from .theme import BACKGROUND, configure_styles
 
@@ -54,6 +58,15 @@ class CreditSearchApp:
                 loader=analyze_credit_card_default,
             ),
             text="Credit Card Default",
+        )
+        notebook.add(
+            DatasetTab(
+                notebook,
+                title="Credit Approval Dataset",
+                subtitle="Датасет заявок на кредит с непрерывными признаками A2, A3 и A8 и бинарным решением по одобрению.",
+                loader=analyze_credit_approval,
+            ),
+            text="Credit Approval",
         )
 
 
