@@ -22,14 +22,16 @@ def format_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
     formatted = frame.copy()
     for column in formatted.columns:
         if pd.api.types.is_numeric_dtype(formatted[column]):
-            formatted[column] = formatted[column].map(
-                lambda value: (
-                    f"{float(value):,.4f}"
-                    if isinstance(value, (float, np.floating))
-                    else f"{int(value):,}"
-                )
-            )
-    return formatted
+            formatted[column] = formatted[column].map(_format_numeric)
+    return formatted.fillna("")
+
+
+def _format_numeric(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        return f"{int(value):,}".replace(",", " ")
+    return f"{float(value):,.4f}".replace(",", " ")
 
 
 class DatasetTab(ttk.Frame):
@@ -45,7 +47,7 @@ class DatasetTab(ttk.Frame):
         self.title = title
         self.subtitle = subtitle
         self.analysis: DatasetAnalysis | None = None
-        self.chart_canvas: FigureCanvasTkAgg | None = None
+        self.chart_canvases: dict[str, FigureCanvasTkAgg | None] = {}
 
         self.status_var = tk.StringVar(value="Нажмите кнопку, чтобы загрузить данные и построить формы.")
         self.query_var = tk.StringVar(value="Запрос ещё не сформирован.")
@@ -53,9 +55,10 @@ class DatasetTab(ttk.Frame):
         self.raw_shape_var = tk.StringVar(value="Строки/столбцы: -")
         self.numeric_shape_var = tk.StringVar(value="Рабочая выборка: -")
         self.query_row_var = tk.StringVar(value="Индекс запроса: -")
-        self.candidates_var = tk.StringVar(value="Кандидатов: -")
+        self.candidates_var = tk.StringVar(value="-")
         self.baseline_time_var = tk.StringVar(value="-")
         self.proposed_time_var = tk.StringVar(value="-")
+        self.speedup_var = tk.StringVar(value="-")
 
         self._build_layout()
 
@@ -63,17 +66,14 @@ class DatasetTab(ttk.Frame):
         header = ttk.Frame(self, style="App.TFrame")
         header.pack(fill="x", pady=(0, 12))
 
-        title_label = ttk.Label(header, text=self.title, style="Title.TLabel")
-        title_label.grid(row=0, column=0, sticky="w")
-        subtitle_label = ttk.Label(header, text=self.subtitle, style="Subtitle.TLabel")
-        subtitle_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(header, text=self.title, style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=self.subtitle, style="Subtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         self.run_button = ttk.Button(header, text="Построить анализ", command=self.run_analysis)
         self.run_button.grid(row=0, column=1, rowspan=2, sticky="e", padx=(16, 0))
         header.columnconfigure(0, weight=1)
 
-        status_label = ttk.Label(self, textvariable=self.status_var, style="Status.TLabel")
-        status_label.pack(fill="x", pady=(0, 12))
+        ttk.Label(self, textvariable=self.status_var, style="Status.TLabel").pack(fill="x", pady=(0, 12))
 
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         body.pack(fill="both", expand=True)
@@ -81,7 +81,7 @@ class DatasetTab(ttk.Frame):
         sidebar = ttk.Frame(body, style="Card.TFrame", padding=14)
         content = ttk.Frame(body, style="App.TFrame")
         body.add(sidebar, weight=1)
-        body.add(content, weight=4)
+        body.add(content, weight=5)
 
         self._build_sidebar(sidebar)
         self._build_content(content)
@@ -89,7 +89,9 @@ class DatasetTab(ttk.Frame):
     def _build_sidebar(self, parent: ttk.Frame) -> None:
         meta_frame = ttk.LabelFrame(parent, text="Сводка", padding=12)
         meta_frame.pack(fill="x", pady=(0, 12))
-        ttk.Label(meta_frame, textvariable=self.source_var, style="Body.TLabel").pack(anchor="w")
+        ttk.Label(meta_frame, textvariable=self.source_var, style="Body.TLabel", wraplength=280, justify="left").pack(
+            anchor="w"
+        )
         ttk.Label(meta_frame, textvariable=self.raw_shape_var, style="Body.TLabel").pack(anchor="w", pady=(6, 0))
         ttk.Label(meta_frame, textvariable=self.numeric_shape_var, style="Body.TLabel").pack(anchor="w", pady=(6, 0))
         ttk.Label(meta_frame, textvariable=self.query_row_var, style="Body.TLabel").pack(anchor="w", pady=(6, 0))
@@ -99,21 +101,14 @@ class DatasetTab(ttk.Frame):
         cards.columnconfigure((0, 1), weight=1)
 
         self._metric_card(cards, "Кандидаты", self.candidates_var, 0, 0)
-        self._metric_card(cards, "Базовый поиск", self.baseline_time_var, 0, 1)
-        self._metric_card(cards, "Ускоренный поиск", self.proposed_time_var, 1, 0, colspan=2)
+        self._metric_card(cards, "Базовый, с", self.baseline_time_var, 0, 1)
+        self._metric_card(cards, "Предлагаемый, с", self.proposed_time_var, 1, 0)
+        self._metric_card(cards, "Ускорение, %", self.speedup_var, 1, 1)
 
         query_frame = ttk.LabelFrame(parent, text="Неточный запрос", padding=12)
-        query_frame.pack(fill="x", pady=(0, 12))
+        query_frame.pack(fill="both", expand=True)
         ttk.Label(query_frame, textvariable=self.query_var, style="Body.TLabel", wraplength=280, justify="left").pack(
             fill="x"
-        )
-
-        self.target_frame = ttk.LabelFrame(parent, text="Целевой признак", padding=10)
-        self.target_frame.pack(fill="both", expand=True)
-        self.target_tree = self._create_tree(
-            self.target_frame,
-            ("value", "count"),
-            [("value", "Значение"), ("count", "Частота")],
         )
 
     def _metric_card(
@@ -123,10 +118,9 @@ class DatasetTab(ttk.Frame):
         variable: tk.StringVar,
         row: int,
         column: int,
-        colspan: int = 1,
     ) -> None:
         card = ttk.Frame(parent, style="Metric.TFrame", padding=12)
-        card.grid(row=row, column=column, columnspan=colspan, sticky="nsew", padx=4, pady=4)
+        card.grid(row=row, column=column, sticky="nsew", padx=4, pady=4)
         ttk.Label(card, text=title, style="CardCaption.TLabel").pack(anchor="w")
         ttk.Label(card, textvariable=variable, style="MetricValue.TLabel").pack(anchor="w", pady=(8, 0))
 
@@ -134,27 +128,32 @@ class DatasetTab(ttk.Frame):
         notebook = ttk.Notebook(parent)
         notebook.pack(fill="both", expand=True)
 
-        tables_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
-        charts_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
-        notebook.add(tables_tab, text="Таблицы")
-        notebook.add(charts_tab, text="Графики")
+        overview_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
+        quantization_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
+        search_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
+        experiment_tab = ttk.Frame(notebook, padding=8, style="App.TFrame")
 
-        self._build_tables_tab(tables_tab)
-        self._build_charts_tab(charts_tab)
+        notebook.add(overview_tab, text="Обзор")
+        notebook.add(quantization_tab, text="Квантование")
+        notebook.add(search_tab, text="Поиск")
+        notebook.add(experiment_tab, text="Эксперимент")
 
-    def _build_tables_tab(self, parent: ttk.Frame) -> None:
+        self._build_overview_tab(overview_tab)
+        self._build_quantization_tab(quantization_tab)
+        self._build_search_tab(search_tab)
+        self._build_experiment_tab(experiment_tab)
+
+    def _build_overview_tab(self, parent: ttk.Frame) -> None:
         top = ttk.Frame(parent, style="App.TFrame")
-        bottom = ttk.Frame(parent, style="App.TFrame")
         top.pack(fill="both", expand=True)
-        bottom.pack(fill="both", expand=True, pady=(12, 0))
 
-        left_top = ttk.LabelFrame(top, text="Статистика признаков", padding=10)
-        right_top = ttk.LabelFrame(top, text="Сравнение времени", padding=10)
-        left_top.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        right_top.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        left = ttk.LabelFrame(top, text="Статистика признаков", padding=10)
+        right = ttk.LabelFrame(top, text="Целевой признак", padding=10)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
         self.stats_tree = self._create_tree(
-            left_top,
+            left,
             ("feature", "min", "max", "mean", "std"),
             [
                 ("feature", "Признак"),
@@ -164,9 +163,105 @@ class DatasetTab(ttk.Frame):
                 ("std", "Std"),
             ],
         )
+        self.target_tree = self._create_dynamic_tree(right)
+
+        self.overview_chart_host = self._create_chart_host(parent, "overview")
+
+    def _build_quantization_tab(self, parent: ttk.Frame) -> None:
+        top = ttk.Frame(parent, style="App.TFrame")
+        middle = ttk.LabelFrame(parent, text="Распределение по группам", padding=10)
+        top.pack(fill="both", expand=True)
+        middle.pack(fill="both", expand=True, pady=(12, 0))
+
+        left = ttk.LabelFrame(top, text="Квартильные границы", padding=10)
+        right = ttk.LabelFrame(top, text="Запрос и группы", padding=10)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        self.quantile_tree = self._create_tree(
+            left,
+            ("feature", "min", "q1", "median", "q3", "max"),
+            [
+                ("feature", "Признак"),
+                ("min", "Min"),
+                ("q1", "Q1"),
+                ("median", "Median"),
+                ("q3", "Q3"),
+                ("max", "Max"),
+            ],
+        )
+        self.query_tree = self._create_tree(
+            right,
+            ("feature", "query_value", "query_group", "allowed_groups"),
+            [
+                ("feature", "Признак"),
+                ("query_value", "Значение"),
+                ("query_group", "Группа"),
+                ("allowed_groups", "Допустимые"),
+            ],
+        )
+        self.group_distribution_tree = self._create_tree(
+            middle,
+            ("feature", "group", "count", "share"),
+            [
+                ("feature", "Признак"),
+                ("group", "Группа"),
+                ("count", "Частота"),
+                ("share", "Доля"),
+            ],
+        )
+
+        self.quantization_chart_host = self._create_chart_host(parent, "quantization")
+
+    def _build_search_tab(self, parent: ttk.Frame) -> None:
+        top = ttk.LabelFrame(parent, text="Шаги фильтра", padding=10)
+        bottom = ttk.Frame(parent, style="App.TFrame")
+        top.pack(fill="both", expand=True)
+        bottom.pack(fill="both", expand=True, pady=(12, 0))
+
+        self.filter_steps_tree = self._create_tree(
+            top,
+            (
+                "stage",
+                "feature",
+                "query_value",
+                "query_group",
+                "allowed_groups",
+                "window_left",
+                "window_right",
+                "matched_rows",
+            ),
+            [
+                ("stage", "Этап"),
+                ("feature", "Признак"),
+                ("query_value", "Запрос"),
+                ("query_group", "Группа"),
+                ("allowed_groups", "Допустимые"),
+                ("window_left", "Левая граница"),
+                ("window_right", "Правая граница"),
+                ("matched_rows", "Осталось"),
+            ],
+        )
+
+        left = ttk.LabelFrame(bottom, text="Top-k: базовый метод", padding=10)
+        right = ttk.LabelFrame(bottom, text="Top-k: предлагаемый метод", padding=10)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        self.baseline_tree = self._create_dynamic_tree(left)
+        self.proposed_tree = self._create_dynamic_tree(right)
+
+    def _build_experiment_tab(self, parent: ttk.Frame) -> None:
+        top = ttk.Frame(parent, style="App.TFrame")
+        top.pack(fill="both", expand=True)
+
+        left = ttk.LabelFrame(top, text="Сравнение времени", padding=10)
+        right = ttk.LabelFrame(top, text="Итоговые метрики", padding=10)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
         self.time_tree = self._create_tree(
-            right_top,
+            left,
             ("method", "mean_seconds", "std_seconds", "processed_rows"),
             [
                 ("method", "Метод"),
@@ -175,23 +270,23 @@ class DatasetTab(ttk.Frame):
                 ("processed_rows", "Строки"),
             ],
         )
+        self.experiment_tree = self._create_tree(
+            right,
+            ("metric", "value"),
+            [
+                ("metric", "Метрика"),
+                ("value", "Значение"),
+            ],
+        )
 
-        left_bottom = ttk.LabelFrame(bottom, text="Top-k: базовый метод", padding=10)
-        right_bottom = ttk.LabelFrame(bottom, text="Top-k: ускоренный метод", padding=10)
-        left_bottom.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        right_bottom.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        self.experiment_chart_host = self._create_chart_host(parent, "experiment")
 
-        self.baseline_tree = self._create_dynamic_tree(left_bottom)
-        self.proposed_tree = self._create_dynamic_tree(right_bottom)
-
-    def _build_charts_tab(self, parent: ttk.Frame) -> None:
-        self.chart_host = ttk.Frame(parent, style="Card.TFrame", padding=8)
-        self.chart_host.pack(fill="both", expand=True)
-        ttk.Label(
-            self.chart_host,
-            text="Графики появятся после запуска анализа.",
-            style="Body.TLabel",
-        ).pack(expand=True)
+    def _create_chart_host(self, parent: ttk.Widget, chart_key: str) -> ttk.Frame:
+        host = ttk.Frame(parent, style="Card.TFrame", padding=8)
+        host.pack(fill="both", expand=True, pady=(12, 0))
+        ttk.Label(host, text="Графики появятся после запуска анализа.", style="Body.TLabel").pack(expand=True)
+        self.chart_canvases[chart_key] = None
+        return host
 
     def _create_tree(
         self,
@@ -209,7 +304,7 @@ class DatasetTab(ttk.Frame):
 
         for column, title in headings:
             tree.heading(column, text=title)
-            tree.column(column, width=110, anchor="center")
+            tree.column(column, width=128, anchor="center")
 
         tree.grid(row=0, column=0, sticky="nsew")
         y_scroll.grid(row=0, column=1, sticky="ns")
@@ -236,7 +331,7 @@ class DatasetTab(ttk.Frame):
 
     def run_analysis(self) -> None:
         self.run_button.configure(state="disabled")
-        self.status_var.set("Загрузка датасета и построение графиков...")
+        self.status_var.set("Загрузка датасета, квантование и построение форм...")
         thread = threading.Thread(target=self._run_analysis_worker, daemon=True)
         thread.start()
 
@@ -256,7 +351,7 @@ class DatasetTab(ttk.Frame):
     def _apply_analysis(self, analysis: DatasetAnalysis) -> None:
         self.analysis = analysis
         self.run_button.configure(state="normal")
-        self.status_var.set("Анализ готов. Таблицы и графики обновлены.")
+        self.status_var.set("Анализ готов. Все разделы обновлены.")
 
         self.source_var.set(f"Источник: {analysis.source_name}")
         self.raw_shape_var.set(
@@ -280,23 +375,43 @@ class DatasetTab(ttk.Frame):
                 "mean_seconds",
             ].iloc[0]
         )
-        self.baseline_time_var.set(f"{baseline_time:.5f} c")
-        self.proposed_time_var.set(f"{proposed_time:.5f} c")
+        speedup = float(
+            analysis.experiment_summary.loc[
+                analysis.experiment_summary["metric"] == "Ускорение, %",
+                "value",
+            ].iloc[0]
+        )
+        self.baseline_time_var.set(f"{baseline_time:.5f}")
+        self.proposed_time_var.set(f"{proposed_time:.5f}")
+        self.speedup_var.set(f"{speedup:.2f}")
 
-        query_lines = [f"{key}: {value:,.3f}".replace(",", " ") for key, value in analysis.query.items()]
+        query_lines = [
+            (
+                f"{feature}: {value:,.3f} | группа {analysis.quantized_query[feature]}"
+            ).replace(",", " ")
+            for feature, value in analysis.query.items()
+        ]
         self.query_var.set("\n".join(query_lines))
 
         self._fill_tree(self.stats_tree, format_dataframe(analysis.feature_summary))
-        self._fill_tree(self.time_tree, format_dataframe(analysis.time_comparison))
+        self._fill_dynamic_tree(
+            self.target_tree,
+            format_dataframe(analysis.target_distribution)
+            if analysis.target_distribution is not None
+            else pd.DataFrame(columns=["value", "count"]),
+        )
+        self._fill_tree(self.quantile_tree, format_dataframe(analysis.quantile_summary))
+        self._fill_tree(self.query_tree, format_dataframe(analysis.query_summary))
+        self._fill_tree(self.group_distribution_tree, format_dataframe(analysis.group_distribution))
+        self._fill_tree(self.filter_steps_tree, format_dataframe(analysis.filter_steps))
         self._fill_dynamic_tree(self.baseline_tree, format_dataframe(analysis.baseline_result))
         self._fill_dynamic_tree(self.proposed_tree, format_dataframe(analysis.proposed_result))
+        self._fill_tree(self.time_tree, format_dataframe(analysis.time_comparison))
+        self._fill_tree(self.experiment_tree, format_dataframe(analysis.experiment_summary))
 
-        if analysis.target_distribution is not None:
-            self._fill_tree(self.target_tree, format_dataframe(analysis.target_distribution))
-        else:
-            self._fill_tree(self.target_tree, pd.DataFrame(columns=["value", "count"]))
-
-        self._render_charts(analysis)
+        self._render_overview_charts(analysis)
+        self._render_quantization_charts(analysis)
+        self._render_experiment_charts(analysis)
 
     def _fill_tree(self, tree: ttk.Treeview, frame: pd.DataFrame) -> None:
         for item in tree.get_children():
@@ -309,31 +424,89 @@ class DatasetTab(ttk.Frame):
         tree.configure(columns=columns)
         for column in columns:
             tree.heading(column, text=column)
-            tree.column(column, width=110, anchor="center")
+            tree.column(column, width=128, anchor="center")
         for item in tree.get_children():
             tree.delete(item)
         for row in frame.itertuples(index=False):
             tree.insert("", "end", values=list(row))
 
-    def _render_charts(self, analysis: DatasetAnalysis) -> None:
-        for child in self.chart_host.winfo_children():
+    def _clear_chart_host(self, host: ttk.Frame, chart_key: str) -> None:
+        for child in host.winfo_children():
             child.destroy()
+        self.chart_canvases[chart_key] = None
 
-        figure = Figure(figsize=(12, 7), dpi=100, facecolor=SURFACE)
-        axes = figure.subplots(2, 3)
-        figure.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.08, hspace=0.35, wspace=0.28)
-        figure.suptitle(analysis.dataset_name, fontsize=15, fontweight="bold", color=TEXT)
+    def _render_overview_charts(self, analysis: DatasetAnalysis) -> None:
+        self._clear_chart_host(self.overview_chart_host, "overview")
+
+        figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
+        axes = figure.subplots(2, 2)
+        figure.subplots_adjust(left=0.06, right=0.98, top=0.92, bottom=0.10, hspace=0.34, wspace=0.28)
+        figure.suptitle(f"{analysis.dataset_name}: обзор", fontsize=15, fontweight="bold", color=TEXT)
 
         for index, feature in enumerate(analysis.feature_columns):
-            axis = axes[0][index]
+            axis = axes[index // 2][index % 2]
             values = analysis.numeric_frame[feature]
-            axis.hist(values, bins=24, color=PRIMARY, alpha=0.85, edgecolor="white")
+            axis.hist(values, bins=24, color=PRIMARY, alpha=0.88, edgecolor="white")
             axis.axvline(analysis.query[feature], color=ACCENT, linewidth=2.0, linestyle="--")
             axis.set_title(f"Распределение: {feature}", color=TEXT, fontsize=10)
             axis.set_facecolor("#fbfcfe")
             axis.grid(color=GRID, alpha=0.8, linestyle="--", linewidth=0.7)
 
-        time_axis = axes[1][0]
+        last_axis = axes[1][1]
+        if analysis.target_distribution is not None and not analysis.target_distribution.empty:
+            categories = analysis.target_distribution.iloc[:, 0].astype(str)
+            counts = analysis.target_distribution.iloc[:, 1]
+            last_axis.bar(categories, counts, color=SECONDARY, width=0.55)
+            last_axis.set_title("Целевой признак", color=TEXT, fontsize=10)
+        else:
+            means = analysis.normalized_frame.mean()
+            last_axis.bar(means.index, means.values, color=SECONDARY, width=0.55)
+            last_axis.set_title("Средние после нормализации", color=TEXT, fontsize=10)
+        last_axis.set_facecolor("#fbfcfe")
+        last_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
+
+        self.chart_canvases["overview"] = FigureCanvasTkAgg(figure, master=self.overview_chart_host)
+        self.chart_canvases["overview"].draw()
+        self.chart_canvases["overview"].get_tk_widget().pack(fill="both", expand=True)
+
+    def _render_quantization_charts(self, analysis: DatasetAnalysis) -> None:
+        self._clear_chart_host(self.quantization_chart_host, "quantization")
+
+        figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
+        axes = figure.subplots(1, len(analysis.feature_columns))
+        if len(analysis.feature_columns) == 1:
+            axes = [axes]
+        figure.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.12, wspace=0.28)
+        figure.suptitle(f"{analysis.dataset_name}: квартильные группы", fontsize=15, fontweight="bold", color=TEXT)
+
+        for axis, feature in zip(axes, analysis.feature_columns):
+            feature_distribution = analysis.group_distribution[analysis.group_distribution["feature"] == feature]
+            counts = (
+                feature_distribution.set_index("group")["count"]
+                .reindex([0, 1, 2, 3], fill_value=0)
+                .astype(int)
+            )
+            axis.bar([str(group) for group in counts.index], counts.values, color=PRIMARY, width=0.55)
+            axis.axvline(analysis.quantized_query[feature], color=ACCENT, linewidth=2.0, linestyle="--")
+            axis.set_title(f"{feature}: группа {analysis.quantized_query[feature]}", color=TEXT, fontsize=10)
+            axis.set_xlabel("Квартильная группа")
+            axis.set_ylabel("Частота")
+            axis.set_facecolor("#fbfcfe")
+            axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
+
+        self.chart_canvases["quantization"] = FigureCanvasTkAgg(figure, master=self.quantization_chart_host)
+        self.chart_canvases["quantization"].draw()
+        self.chart_canvases["quantization"].get_tk_widget().pack(fill="both", expand=True)
+
+    def _render_experiment_charts(self, analysis: DatasetAnalysis) -> None:
+        self._clear_chart_host(self.experiment_chart_host, "experiment")
+
+        figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
+        axes = figure.subplots(1, 3)
+        figure.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.14, wspace=0.30)
+        figure.suptitle(f"{analysis.dataset_name}: сравнение методов", fontsize=15, fontweight="bold", color=TEXT)
+
+        time_axis = axes[0]
         time_axis.bar(
             analysis.time_comparison["method"],
             analysis.time_comparison["mean_seconds"],
@@ -341,10 +514,10 @@ class DatasetTab(ttk.Frame):
             width=0.55,
         )
         time_axis.set_title("Среднее время поиска", color=TEXT, fontsize=10)
-        time_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
         time_axis.set_facecolor("#fbfcfe")
+        time_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        rows_axis = axes[1][1]
+        rows_axis = axes[1]
         rows_axis.bar(
             analysis.time_comparison["method"],
             analysis.time_comparison["processed_rows"],
@@ -352,23 +525,25 @@ class DatasetTab(ttk.Frame):
             width=0.55,
         )
         rows_axis.set_title("Обработано записей", color=TEXT, fontsize=10)
-        rows_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
         rows_axis.set_facecolor("#fbfcfe")
+        rows_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        target_axis = axes[1][2]
-        if analysis.target_distribution is not None and not analysis.target_distribution.empty:
-            target_frame = analysis.target_distribution
-            categories = target_frame.iloc[:, 0].astype(str)
-            counts = target_frame.iloc[:, 1]
-            target_axis.bar(categories, counts, color=PRIMARY, width=0.55)
-            target_axis.set_title("Целевой признак", color=TEXT, fontsize=10)
-        else:
-            normalized_means = analysis.normalized_frame.mean()
-            target_axis.bar(normalized_means.index, normalized_means.values, color=PRIMARY, width=0.55)
-            target_axis.set_title("Средние после нормализации", color=TEXT, fontsize=10)
-        target_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
-        target_axis.set_facecolor("#fbfcfe")
+        metrics = analysis.experiment_summary.set_index("metric")["value"]
+        effect_axis = axes[2]
+        effect_axis.bar(
+            ["Сокращение\nкандидатов", "Ускорение\nпо времени", "Top-k\nсовпадение"],
+            [
+                float(metrics.get("Сокращение кандидатов, %", 0.0)),
+                float(metrics.get("Ускорение, %", 0.0)),
+                float(metrics.get("Совпадение top-k, %", 0.0)),
+            ],
+            color=[PRIMARY, ACCENT, SECONDARY],
+            width=0.55,
+        )
+        effect_axis.set_title("Эффект предлагаемого метода, %", color=TEXT, fontsize=10)
+        effect_axis.set_facecolor("#fbfcfe")
+        effect_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        self.chart_canvas = FigureCanvasTkAgg(figure, master=self.chart_host)
-        self.chart_canvas.draw()
-        self.chart_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.chart_canvases["experiment"] = FigureCanvasTkAgg(figure, master=self.experiment_chart_host)
+        self.chart_canvases["experiment"].draw()
+        self.chart_canvases["experiment"].get_tk_widget().pack(fill="both", expand=True)
