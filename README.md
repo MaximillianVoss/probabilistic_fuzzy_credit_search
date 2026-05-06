@@ -43,3 +43,7 @@
 3. Установить зависимости: `pip install -r requirements.txt`
 4. Для визуального режима запускать `main.py`.
 5. При необходимости можно импортировать конкретные классы датасетов из `src/datasets`.
+
+Запуск тестов:
+
+- `python -m unittest discover -s tests -v`
