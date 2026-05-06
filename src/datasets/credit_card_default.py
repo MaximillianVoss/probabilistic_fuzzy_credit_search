@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+from pandas.core.frame import DataFrame
 
 from .base import AnalyticalDataset, DatasetAnalysis
 
@@ -25,7 +26,7 @@ COLUMN_RENAME_MAP = {
 }
 
 
-def standardize_columns(frame: pd.DataFrame) -> pd.DataFrame:
+def standardize_columns(frame: DataFrame) -> DataFrame:
     cleaned_names = {column: str(column).strip() for column in frame.columns}
     frame = frame.rename(columns=cleaned_names)
     return frame.rename(columns=COLUMN_RENAME_MAP)
@@ -43,7 +44,7 @@ class CreditCardDefaultDataset(AnalyticalDataset):
     target_column = "default_next_month"
     minimum_span = 100.0
 
-    def load_dataset(self) -> tuple[pd.DataFrame, str]:
+    def load_dataset(self) -> tuple[DataFrame, str]:
         if LOCAL_CSV_FILE.exists():
             frame = pd.read_csv(LOCAL_CSV_FILE)
             return standardize_columns(frame), LOCAL_CSV_FILE.name

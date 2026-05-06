@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from numbers import Integral
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -9,19 +10,19 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 
-import numpy as np
 import pandas as pd
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from pandas.api.types import is_numeric_dtype
 from matplotlib.figure import Figure
 
 from ..datasets.base import DatasetAnalysis
+from .backend import FigureCanvasTkAgg
 from .theme import ACCENT, GRID, PRIMARY, SECONDARY, SURFACE, TEXT
 
 
 def format_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
     formatted = frame.copy()
     for column in formatted.columns:
-        if pd.api.types.is_numeric_dtype(formatted[column]):
+        if is_numeric_dtype(formatted[column]):
             formatted[column] = formatted[column].map(_format_numeric)
     return formatted.fillna("")
 
@@ -29,7 +30,7 @@ def format_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
 def _format_numeric(value: object) -> str:
     if pd.isna(value):
         return ""
-    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+    if isinstance(value, Integral) and not isinstance(value, bool):
         return f"{int(value):,}".replace(",", " ")
     return f"{float(value):,.4f}".replace(",", " ")
 

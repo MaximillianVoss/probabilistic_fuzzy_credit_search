@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import math
+import random
+import statistics
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.request import urlopen
 
-from numpy import exp, mean, std
-from numpy.random import default_rng
-from pandas import DataFrame, Series, concat, to_numeric
+import pandas as pd
+from pandas.core.frame import DataFrame
+from pandas.core.series import Series
 
 
 @dataclass(slots=True)
@@ -89,7 +92,7 @@ class AnalyticalDataset(ABC):
 
 
 def prepare_numeric_frame(frame: DataFrame, feature_columns: list[str]) -> DataFrame:
-    prepared = frame[feature_columns].apply(to_numeric, errors="coerce")
+    prepared = frame[feature_columns].apply(pd.to_numeric, errors="coerce")
     prepared = prepared.dropna().reset_index(drop=True)
     return prepared
 
@@ -155,8 +158,8 @@ def build_query(
     if frame.empty:
         raise ValueError("После подготовки не осталось строк для построения запроса.")
 
-    rng = default_rng(seed)
-    row_index = int(rng.integers(0, len(frame)))
+    rng = random.Random(seed)
+    row_index = rng.randrange(len(frame))
     source_row = frame.iloc[row_index]
     query = {
         feature: float(source_row[feature]) * query_perturbation[feature]
@@ -171,7 +174,7 @@ def relative_difference(value: float, query_value: float, eps: float = 1e-9) -> 
 
 def baseline_score(row: Series, query: dict[str, float]) -> float:
     deltas = [relative_difference(row[column], query[column]) for column in query]
-    return float(exp(-sum(deltas)))
+    return float(math.exp(-sum(deltas)))
 
 
 def baseline_search(frame: DataFrame, query: dict[str, float], top_k: int = 10) -> DataFrame:
@@ -282,7 +285,7 @@ def filter_candidates(
         relative_window=relative_window,
         minimum_span=minimum_span,
     )
-    return window_filtered, concat([quartile_steps, window_steps], ignore_index=True)
+    return window_filtered, pd.concat([quartile_steps, window_steps], ignore_index=True)
 
 
 def proposed_score(
@@ -297,7 +300,7 @@ def proposed_score(
     score = 0.0
     for column in query:
         distance = relative_difference(row[column], query[column])
-        score += weights[column] * exp(-alpha * distance)
+        score += weights[column] * math.exp(-alpha * distance)
     return float(score)
 
 
@@ -344,7 +347,7 @@ def measure_time(function, *args, repeats: int = 30, **kwargs) -> tuple[float, f
         start = time.perf_counter()
         function(*args, **kwargs)
         timings.append(time.perf_counter() - start)
-    return float(mean(timings)), float(std(timings))
+    return float(statistics.fmean(timings)), float(statistics.pstdev(timings))
 
 
 def build_feature_summary(frame: DataFrame) -> DataFrame:

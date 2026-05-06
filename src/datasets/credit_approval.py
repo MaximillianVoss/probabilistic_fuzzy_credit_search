@@ -3,7 +3,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from pandas import DataFrame
+import pandas as pd
+from pandas.core.frame import DataFrame
 
 from .base import AnalyticalDataset, DatasetAnalysis
 
@@ -34,7 +35,7 @@ class CreditApprovalDataset(AnalyticalDataset):
             for row in reader:
                 rows.append([None if value == "?" else value for value in row])
 
-        frame = DataFrame(rows, columns=COLUMNS)
+        frame = pd.DataFrame(rows, columns=COLUMNS)
         return frame, data_path.name
 
 

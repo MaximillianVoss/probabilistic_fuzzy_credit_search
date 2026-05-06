@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+from pandas.core.frame import DataFrame
 
 from .base import AnalyticalDataset, DatasetAnalysis
 
@@ -54,7 +55,7 @@ class GermanCreditDataset(AnalyticalDataset):
     weights = {"age": 1.0, "credit_amount": 1.5, "duration_months": 1.0}
     target_column = "target"
 
-    def load_dataset(self) -> tuple[pd.DataFrame, str]:
+    def load_dataset(self) -> tuple[DataFrame, str]:
         if LOCAL_KAGGLE_FILE.exists():
             frame = pd.read_csv(LOCAL_KAGGLE_FILE).rename(columns=KAGGLE_RENAME_MAP)
             return frame, LOCAL_KAGGLE_FILE.name
