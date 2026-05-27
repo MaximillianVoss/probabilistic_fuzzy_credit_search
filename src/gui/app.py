@@ -16,12 +16,21 @@ class CreditSearchApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Probabilistic Fuzzy Credit Search")
-        self.root.geometry("1520x920")
-        self.root.minsize(1280, 780)
+        self._set_window_size()
         self.root.configure(bg=BACKGROUND)
 
         configure_styles(ttk.Style(self.root))
         self._build_root()
+
+    def _set_window_size(self) -> None:
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        min_width = min(980, max(860, screen_width - 80))
+        min_height = min(640, max(600, screen_height - 120))
+        width = min(1520, max(min_width, screen_width - 80))
+        height = min(920, max(min_height, screen_height - 120))
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(min_width, min_height)
 
     def _build_root(self) -> None:
         wrapper = ttk.Frame(self.root, style="App.TFrame", padding=18)

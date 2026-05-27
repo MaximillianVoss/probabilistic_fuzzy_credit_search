@@ -36,6 +36,10 @@ def _format_numeric(value: object) -> str:
 
 
 class DatasetTab(ttk.Frame):
+    TABLE_PANE_MIN_HEIGHT = 170
+    CHART_PANE_MIN_HEIGHT = 260
+    INITIAL_CHART_SPLIT = 0.52
+
     def __init__(
         self,
         master: ttk.Notebook,
@@ -145,8 +149,7 @@ class DatasetTab(ttk.Frame):
         self._build_experiment_tab(experiment_tab)
 
     def _build_overview_tab(self, parent: ttk.Frame) -> None:
-        top = ttk.Frame(parent, style="App.TFrame")
-        top.pack(fill="both", expand=True)
+        top, charts = self._create_resizable_chart_layout(parent)
 
         left = ttk.LabelFrame(top, text="Статистика признаков", padding=10)
         right = ttk.LabelFrame(top, text="Целевой признак", padding=10)
@@ -166,11 +169,12 @@ class DatasetTab(ttk.Frame):
         )
         self.target_tree = self._create_dynamic_tree(right)
 
-        self.overview_chart_host = self._create_chart_host(parent, "overview")
+        self.overview_chart_host = self._create_chart_host(charts, "overview")
 
     def _build_quantization_tab(self, parent: ttk.Frame) -> None:
-        top = ttk.Frame(parent, style="App.TFrame")
-        middle = ttk.LabelFrame(parent, text="Распределение по группам", padding=10)
+        main, charts = self._create_resizable_chart_layout(parent)
+        top = ttk.Frame(main, style="App.TFrame")
+        middle = ttk.LabelFrame(main, text="Распределение по группам", padding=10)
         top.pack(fill="both", expand=True)
         middle.pack(fill="both", expand=True, pady=(12, 0))
 
@@ -212,7 +216,7 @@ class DatasetTab(ttk.Frame):
             ],
         )
 
-        self.quantization_chart_host = self._create_chart_host(parent, "quantization")
+        self.quantization_chart_host = self._create_chart_host(charts, "quantization")
 
     def _build_search_tab(self, parent: ttk.Frame) -> None:
         top = ttk.LabelFrame(parent, text="Шаги фильтра", padding=10)
@@ -253,8 +257,7 @@ class DatasetTab(ttk.Frame):
         self.proposed_tree = self._create_dynamic_tree(right)
 
     def _build_experiment_tab(self, parent: ttk.Frame) -> None:
-        top = ttk.Frame(parent, style="App.TFrame")
-        top.pack(fill="both", expand=True)
+        top, charts = self._create_resizable_chart_layout(parent)
 
         left = ttk.LabelFrame(top, text="Сравнение времени", padding=10)
         right = ttk.LabelFrame(top, text="Итоговые метрики", padding=10)
@@ -280,14 +283,49 @@ class DatasetTab(ttk.Frame):
             ],
         )
 
-        self.experiment_chart_host = self._create_chart_host(parent, "experiment")
+        self.experiment_chart_host = self._create_chart_host(charts, "experiment")
 
     def _create_chart_host(self, parent: ttk.Widget, chart_key: str) -> ttk.Frame:
         host = ttk.Frame(parent, style="Card.TFrame", padding=8)
-        host.pack(fill="both", expand=True, pady=(12, 0))
+        host.pack(fill="both", expand=True)
         ttk.Label(host, text="Графики появятся после запуска анализа.", style="Body.TLabel").pack(expand=True)
         self.chart_canvases[chart_key] = None
         return host
+
+    def _create_resizable_chart_layout(self, parent: ttk.Widget) -> tuple[ttk.Frame, ttk.Frame]:
+        split = tk.PanedWindow(
+            parent,
+            orient=tk.VERTICAL,
+            borderwidth=0,
+            sashwidth=8,
+            sashrelief=tk.RAISED,
+            showhandle=True,
+            handlesize=12,
+            bg=GRID,
+        )
+        split.pack(fill="both", expand=True)
+
+        top = ttk.Frame(split, style="App.TFrame")
+        charts = ttk.Frame(split, style="App.TFrame")
+        split.add(top, minsize=self.TABLE_PANE_MIN_HEIGHT, stretch="always")
+        split.add(charts, minsize=self.CHART_PANE_MIN_HEIGHT, stretch="always")
+        self._place_initial_chart_split(split)
+        return top, charts
+
+    def _place_initial_chart_split(self, split: tk.PanedWindow, attempts: int = 8) -> None:
+        def place() -> None:
+            height = split.winfo_height()
+            if height <= 1:
+                if attempts > 0:
+                    split.after(50, lambda: self._place_initial_chart_split(split, attempts - 1))
+                return
+            y = max(self.TABLE_PANE_MIN_HEIGHT, int(height * self.INITIAL_CHART_SPLIT))
+            try:
+                split.sash_place(0, 0, y)
+            except tk.TclError:
+                pass
+
+        split.after_idle(place)
 
     def _create_tree(
         self,
@@ -441,8 +479,8 @@ class DatasetTab(ttk.Frame):
 
         figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
         axes = figure.subplots(2, 2)
-        figure.subplots_adjust(left=0.06, right=0.98, top=0.92, bottom=0.10, hspace=0.34, wspace=0.28)
-        figure.suptitle(f"{analysis.dataset_name}: обзор", fontsize=15, fontweight="bold", color=TEXT)
+        figure.subplots_adjust(left=0.07, right=0.98, top=0.84, bottom=0.12, hspace=0.55, wspace=0.30)
+        figure.suptitle(f"{analysis.dataset_name}: обзор", fontsize=13, fontweight="bold", color=TEXT)
 
         for index, feature in enumerate(analysis.feature_columns):
             axis = axes[index // 2][index % 2]
@@ -477,8 +515,8 @@ class DatasetTab(ttk.Frame):
         axes = figure.subplots(1, len(analysis.feature_columns))
         if len(analysis.feature_columns) == 1:
             axes = [axes]
-        figure.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.12, wspace=0.28)
-        figure.suptitle(f"{analysis.dataset_name}: квартильные группы", fontsize=15, fontweight="bold", color=TEXT)
+        figure.subplots_adjust(left=0.07, right=0.98, top=0.80, bottom=0.16, wspace=0.30)
+        figure.suptitle(f"{analysis.dataset_name}: квартильные группы", fontsize=13, fontweight="bold", color=TEXT)
 
         for axis, feature in zip(axes, analysis.feature_columns):
             feature_distribution = analysis.group_distribution[analysis.group_distribution["feature"] == feature]
@@ -504,8 +542,8 @@ class DatasetTab(ttk.Frame):
 
         figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
         axes = figure.subplots(1, 3)
-        figure.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.14, wspace=0.30)
-        figure.suptitle(f"{analysis.dataset_name}: сравнение методов", fontsize=15, fontweight="bold", color=TEXT)
+        figure.subplots_adjust(left=0.07, right=0.98, top=0.80, bottom=0.18, wspace=0.32)
+        figure.suptitle(f"{analysis.dataset_name}: сравнение методов", fontsize=13, fontweight="bold", color=TEXT)
 
         time_axis = axes[0]
         time_axis.bar(
