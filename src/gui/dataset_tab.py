@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from numbers import Integral
+from pathlib import Path
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 import matplotlib
@@ -257,6 +258,17 @@ class DatasetTab(ttk.Frame):
         self.proposed_tree = self._create_dynamic_tree(right)
 
     def _build_experiment_tab(self, parent: ttk.Frame) -> None:
+        actions = ttk.Frame(parent, style="App.TFrame")
+        actions.pack(fill="x", pady=(0, 8))
+
+        self.export_button = ttk.Button(
+            actions,
+            text="Экспорт таблицы сравнения",
+            command=self.export_comparison_table,
+            state="disabled",
+        )
+        self.export_button.pack(side="right")
+
         top, charts = self._create_resizable_chart_layout(parent)
 
         left = ttk.LabelFrame(top, text="Сравнение времени", padding=10)
@@ -370,6 +382,7 @@ class DatasetTab(ttk.Frame):
 
     def run_analysis(self) -> None:
         self.run_button.configure(state="disabled")
+        self.export_button.configure(state="disabled")
         self.status_var.set("Загрузка датасета, квантование и построение форм...")
         thread = threading.Thread(target=self._run_analysis_worker, daemon=True)
         thread.start()
@@ -384,12 +397,14 @@ class DatasetTab(ttk.Frame):
 
     def _handle_error(self, exc: Exception) -> None:
         self.run_button.configure(state="normal")
+        self.export_button.configure(state="disabled")
         self.status_var.set("Ошибка при построении анализа.")
         messagebox.showerror("Ошибка", str(exc))
 
     def _apply_analysis(self, analysis: DatasetAnalysis) -> None:
         self.analysis = analysis
         self.run_button.configure(state="normal")
+        self.export_button.configure(state="normal")
         self.status_var.set("Анализ готов. Все разделы обновлены.")
 
         self.source_var.set(f"Источник: {analysis.source_name}")
@@ -451,6 +466,81 @@ class DatasetTab(ttk.Frame):
         self._render_overview_charts(analysis)
         self._render_quantization_charts(analysis)
         self._render_experiment_charts(analysis)
+
+    def export_comparison_table(self) -> None:
+        if self.analysis is None:
+            messagebox.showwarning("Экспорт", "Сначала постройте анализ.")
+            return
+
+        initial_name = self._default_export_filename()
+        file_path = filedialog.asksaveasfilename(
+            title="Экспорт таблицы сравнения",
+            defaultextension=".csv",
+            initialfile=initial_name,
+            filetypes=[
+                ("CSV для Excel", "*.csv"),
+                ("Все файлы", "*.*"),
+            ],
+        )
+        if not file_path:
+            return
+
+        try:
+            export_frame = self._build_comparison_export_frame(self.analysis)
+            export_frame.to_csv(file_path, index=False, sep=";", encoding="utf-8-sig")
+        except OSError as exc:
+            messagebox.showerror("Экспорт", f"Не удалось сохранить файл:\n{exc}")
+            return
+
+        self.status_var.set(f"Таблица сравнения экспортирована: {Path(file_path).name}")
+
+    def _default_export_filename(self) -> str:
+        dataset_name = self.analysis.dataset_name if self.analysis is not None else self.title
+        safe_name = "".join(char if char.isalnum() else "_" for char in dataset_name.lower()).strip("_")
+        return f"{safe_name}_comparison.csv"
+
+    def _build_comparison_export_frame(self, analysis: DatasetAnalysis) -> pd.DataFrame:
+        time_frame = analysis.time_comparison.set_index("method")
+        metrics = analysis.experiment_summary.set_index("metric")["value"]
+
+        baseline_rows = int(time_frame.loc["baseline", "processed_rows"])
+        proposed_rows = int(time_frame.loc["proposed", "processed_rows"])
+        baseline_time = float(time_frame.loc["baseline", "mean_seconds"])
+        proposed_time = float(time_frame.loc["proposed", "mean_seconds"])
+        candidate_reduction = float(metrics.get("Сокращение кандидатов, %", 0.0))
+        speedup = float(metrics.get("Ускорение, %", 0.0))
+        top_k_overlap = float(metrics.get("Совпадение top-k, %", 0.0))
+
+        return pd.DataFrame(
+            [
+                {
+                    "Показатель": "Обработано записей",
+                    "Базовый метод": f"{baseline_rows:,}".replace(",", " "),
+                    "Предложенный метод": f"{proposed_rows:,}".replace(",", " "),
+                },
+                {
+                    "Показатель": "Время поиска",
+                    "Базовый метод": f"{baseline_time:.5f} с",
+                    "Предложенный метод": f"{proposed_time:.5f} с",
+                },
+                {
+                    "Показатель": "Сокращение кандидатов",
+                    "Базовый метод": "-",
+                    "Предложенный метод": f"{candidate_reduction:.2f} %",
+                },
+                {
+                    "Показатель": "Ускорение",
+                    "Базовый метод": "-",
+                    "Предложенный метод": f"{speedup:.2f} %",
+                },
+                {
+                    "Показатель": "Совпадение top-k",
+                    "Базовый метод": "-",
+                    "Предложенный метод": f"{top_k_overlap:.2f} %",
+                },
+            ],
+            columns=["Показатель", "Базовый метод", "Предложенный метод"],
+        )
 
     def _fill_tree(self, tree: ttk.Treeview, frame: pd.DataFrame) -> None:
         for item in tree.get_children():

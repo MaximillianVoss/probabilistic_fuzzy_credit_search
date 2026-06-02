@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import tkinter as tk
 import unittest
 from tkinter import ttk
@@ -104,6 +106,134 @@ class GuiTests(unittest.TestCase):
             self.assertIsInstance(tab.chart_canvases["overview"], FigureCanvasTkAgg)
             self.assertIsInstance(tab.chart_canvases["quantization"], FigureCanvasTkAgg)
             self.assertIsInstance(tab.chart_canvases["experiment"], FigureCanvasTkAgg)
+            self.assertEqual(str(tab.export_button["state"]), "normal")
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_export_button_is_disabled_before_analysis(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            self.assertEqual(str(tab.export_button["state"]), "disabled")
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_builds_comparison_export_table(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            frame = tab._build_comparison_export_frame(analysis)
+
+            self.assertEqual(list(frame.columns), ["Показатель", "Базовый метод", "Предложенный метод"])
+            self.assertEqual(frame.iloc[0]["Показатель"], "Обработано записей")
+            self.assertEqual(frame.iloc[0]["Базовый метод"], "8")
+            self.assertEqual(frame.iloc[0]["Предложенный метод"], "1")
+            self.assertIn("с", frame.iloc[1]["Базовый метод"])
+            self.assertIn("%", frame.iloc[2]["Предложенный метод"])
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_exports_comparison_table_to_csv(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+
+            with TemporaryDirectory() as temp_dir:
+                output_path = Path(temp_dir) / "comparison.csv"
+                with patch("src.gui.dataset_tab.filedialog.asksaveasfilename", return_value=str(output_path)):
+                    tab.export_comparison_table()
+
+                exported = output_path.read_text(encoding="utf-8-sig")
+
+            self.assertIn("Показатель;Базовый метод;Предложенный метод", exported)
+            self.assertIn("Обработано записей;8;1", exported)
+            self.assertIn("Таблица сравнения экспортирована", tab.status_var.get())
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_export_without_analysis_shows_warning(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            with patch("src.gui.dataset_tab.messagebox.showwarning") as showwarning:
+                with patch("src.gui.dataset_tab.filedialog.asksaveasfilename") as asksaveasfilename:
+                    tab.export_comparison_table()
+
+            showwarning.assert_called_once_with("Экспорт", "Сначала постройте анализ.")
+            asksaveasfilename.assert_not_called()
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_export_cancel_keeps_current_status(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+            status_before_export = tab.status_var.get()
+
+            with patch("src.gui.dataset_tab.filedialog.asksaveasfilename", return_value=""):
+                tab.export_comparison_table()
+
+            self.assertEqual(tab.status_var.get(), status_before_export)
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_export_write_error_shows_message(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+
+            with TemporaryDirectory() as temp_dir:
+                missing_path = Path(temp_dir) / "missing" / "comparison.csv"
+                with patch("src.gui.dataset_tab.filedialog.asksaveasfilename", return_value=str(missing_path)):
+                    with patch("src.gui.dataset_tab.messagebox.showerror") as showerror:
+                        tab.export_comparison_table()
+
+            showerror.assert_called_once()
+            self.assertIn("Не удалось сохранить файл", showerror.call_args.args[1])
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_default_export_filename_uses_dataset_name(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+
+            self.assertEqual(tab._default_export_filename(), "gui_synthetic_dataset_comparison.csv")
         finally:
             root.destroy()
 
