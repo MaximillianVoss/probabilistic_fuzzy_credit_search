@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from numbers import Integral
 from pathlib import Path
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
+from xml.etree import ElementTree
 
 import matplotlib
 
@@ -37,10 +39,6 @@ def _format_numeric(value: object) -> str:
 
 
 class DatasetTab(ttk.Frame):
-    TABLE_PANE_MIN_HEIGHT = 170
-    CHART_PANE_MIN_HEIGHT = 260
-    INITIAL_CHART_SPLIT = 0.52
-
     def __init__(
         self,
         master: ttk.Notebook,
@@ -65,6 +63,7 @@ class DatasetTab(ttk.Frame):
         self.baseline_time_var = tk.StringVar(value="-")
         self.proposed_time_var = tk.StringVar(value="-")
         self.speedup_var = tk.StringVar(value="-")
+        self.export_format_var = tk.StringVar(value="CSV")
 
         self._build_layout()
 
@@ -150,10 +149,10 @@ class DatasetTab(ttk.Frame):
         self._build_experiment_tab(experiment_tab)
 
     def _build_overview_tab(self, parent: ttk.Frame) -> None:
-        top, charts = self._create_resizable_chart_layout(parent)
+        tables, charts = self._create_table_chart_tabs(parent)
 
-        left = ttk.LabelFrame(top, text="Статистика признаков", padding=10)
-        right = ttk.LabelFrame(top, text="Целевой признак", padding=10)
+        left = ttk.LabelFrame(tables, text="Статистика признаков", padding=10)
+        right = ttk.LabelFrame(tables, text="Целевой признак", padding=10)
         left.pack(side="left", fill="both", expand=True, padx=(0, 6))
         right.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
@@ -173,9 +172,9 @@ class DatasetTab(ttk.Frame):
         self.overview_chart_host = self._create_chart_host(charts, "overview")
 
     def _build_quantization_tab(self, parent: ttk.Frame) -> None:
-        main, charts = self._create_resizable_chart_layout(parent)
-        top = ttk.Frame(main, style="App.TFrame")
-        middle = ttk.LabelFrame(main, text="Распределение по группам", padding=10)
+        tables, charts = self._create_table_chart_tabs(parent)
+        top = ttk.Frame(tables, style="App.TFrame")
+        middle = ttk.LabelFrame(tables, text="Распределение по группам", padding=10)
         top.pack(fill="both", expand=True)
         middle.pack(fill="both", expand=True, pady=(12, 0))
 
@@ -258,7 +257,9 @@ class DatasetTab(ttk.Frame):
         self.proposed_tree = self._create_dynamic_tree(right)
 
     def _build_experiment_tab(self, parent: ttk.Frame) -> None:
-        actions = ttk.Frame(parent, style="App.TFrame")
+        tables, charts = self._create_table_chart_tabs(parent)
+
+        actions = ttk.Frame(tables, style="App.TFrame")
         actions.pack(fill="x", pady=(0, 8))
 
         self.export_button = ttk.Button(
@@ -268,8 +269,17 @@ class DatasetTab(ttk.Frame):
             state="disabled",
         )
         self.export_button.pack(side="right")
+        self.export_format_box = ttk.Combobox(
+            actions,
+            textvariable=self.export_format_var,
+            values=("CSV", "JSON", "XML"),
+            width=7,
+            state="readonly",
+        )
+        self.export_format_box.pack(side="right", padx=(0, 8))
 
-        top, charts = self._create_resizable_chart_layout(parent)
+        top = ttk.Frame(tables, style="App.TFrame")
+        top.pack(fill="both", expand=True)
 
         left = ttk.LabelFrame(top, text="Сравнение времени", padding=10)
         right = ttk.LabelFrame(top, text="Итоговые метрики", padding=10)
@@ -297,47 +307,22 @@ class DatasetTab(ttk.Frame):
 
         self.experiment_chart_host = self._create_chart_host(charts, "experiment")
 
+    def _create_table_chart_tabs(self, parent: ttk.Widget) -> tuple[ttk.Frame, ttk.Frame]:
+        notebook = ttk.Notebook(parent)
+        notebook.pack(fill="both", expand=True)
+
+        tables = ttk.Frame(notebook, padding=8, style="App.TFrame")
+        charts = ttk.Frame(notebook, padding=8, style="App.TFrame")
+        notebook.add(tables, text="Таблицы")
+        notebook.add(charts, text="Графики")
+        return tables, charts
+
     def _create_chart_host(self, parent: ttk.Widget, chart_key: str) -> ttk.Frame:
         host = ttk.Frame(parent, style="Card.TFrame", padding=8)
         host.pack(fill="both", expand=True)
         ttk.Label(host, text="Графики появятся после запуска анализа.", style="Body.TLabel").pack(expand=True)
         self.chart_canvases[chart_key] = None
         return host
-
-    def _create_resizable_chart_layout(self, parent: ttk.Widget) -> tuple[ttk.Frame, ttk.Frame]:
-        split = tk.PanedWindow(
-            parent,
-            orient=tk.VERTICAL,
-            borderwidth=0,
-            sashwidth=8,
-            sashrelief=tk.RAISED,
-            showhandle=True,
-            handlesize=12,
-            bg=GRID,
-        )
-        split.pack(fill="both", expand=True)
-
-        top = ttk.Frame(split, style="App.TFrame")
-        charts = ttk.Frame(split, style="App.TFrame")
-        split.add(top, minsize=self.TABLE_PANE_MIN_HEIGHT, stretch="always")
-        split.add(charts, minsize=self.CHART_PANE_MIN_HEIGHT, stretch="always")
-        self._place_initial_chart_split(split)
-        return top, charts
-
-    def _place_initial_chart_split(self, split: tk.PanedWindow, attempts: int = 8) -> None:
-        def place() -> None:
-            height = split.winfo_height()
-            if height <= 1:
-                if attempts > 0:
-                    split.after(50, lambda: self._place_initial_chart_split(split, attempts - 1))
-                return
-            y = max(self.TABLE_PANE_MIN_HEIGHT, int(height * self.INITIAL_CHART_SPLIT))
-            try:
-                split.sash_place(0, 0, y)
-            except tk.TclError:
-                pass
-
-        split.after_idle(place)
 
     def _create_tree(
         self,
@@ -472,32 +457,83 @@ class DatasetTab(ttk.Frame):
             messagebox.showwarning("Экспорт", "Сначала постройте анализ.")
             return
 
-        initial_name = self._default_export_filename()
+        selected_format = self._selected_export_format()
+        extension, filetypes = self._export_dialog_options(selected_format)
+        initial_name = self._default_export_filename(extension)
         file_path = filedialog.asksaveasfilename(
             title="Экспорт таблицы сравнения",
-            defaultextension=".csv",
+            defaultextension=extension,
             initialfile=initial_name,
-            filetypes=[
-                ("CSV для Excel", "*.csv"),
-                ("Все файлы", "*.*"),
-            ],
+            filetypes=filetypes,
         )
         if not file_path:
             return
 
         try:
             export_frame = self._build_comparison_export_frame(self.analysis)
-            export_frame.to_csv(file_path, index=False, sep=";", encoding="utf-8-sig")
+            self._write_comparison_export(file_path, export_frame, selected_format)
         except OSError as exc:
             messagebox.showerror("Экспорт", f"Не удалось сохранить файл:\n{exc}")
             return
 
         self.status_var.set(f"Таблица сравнения экспортирована: {Path(file_path).name}")
 
-    def _default_export_filename(self) -> str:
+    def _selected_export_format(self) -> str:
+        selected = self.export_format_var.get().strip().upper()
+        if selected in {"CSV", "JSON", "XML"}:
+            return selected
+        return "CSV"
+
+    def _export_dialog_options(self, export_format: str) -> tuple[str, list[tuple[str, str]]]:
+        if export_format == "JSON":
+            return ".json", [("JSON", "*.json"), ("Все файлы", "*.*")]
+        if export_format == "XML":
+            return ".xml", [("XML", "*.xml"), ("Все файлы", "*.*")]
+        return ".csv", [("CSV для Excel", "*.csv"), ("Все файлы", "*.*")]
+
+    def _default_export_filename(self, extension: str | None = None) -> str:
+        if extension is None:
+            extension, _ = self._export_dialog_options(self._selected_export_format())
         dataset_name = self.analysis.dataset_name if self.analysis is not None else self.title
         safe_name = "".join(char if char.isalnum() else "_" for char in dataset_name.lower()).strip("_")
-        return f"{safe_name}_comparison.csv"
+        return f"{safe_name}_comparison{extension}"
+
+    def _write_comparison_export(
+        self,
+        file_path: str,
+        export_frame: pd.DataFrame,
+        export_format: str,
+    ) -> None:
+        path = Path(file_path)
+        if export_format == "JSON":
+            records = export_frame.to_dict(orient="records")
+            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+            return
+        if export_format == "XML":
+            path.write_text(self._comparison_frame_to_xml(export_frame), encoding="utf-8")
+            return
+        export_frame.to_csv(path, index=False, sep=";", encoding="utf-8-sig")
+
+    def _comparison_frame_to_xml(self, export_frame: pd.DataFrame) -> str:
+        root = ElementTree.Element("comparison")
+        for row in export_frame.to_dict(orient="records"):
+            item = ElementTree.SubElement(root, "row")
+            for column, value in row.items():
+                tag = self._xml_tag_from_column(column)
+                ElementTree.SubElement(item, tag).text = str(value)
+        ElementTree.indent(root, space="  ")
+        return '<?xml version="1.0" encoding="utf-8"?>\n' + ElementTree.tostring(
+            root,
+            encoding="unicode",
+        )
+
+    def _xml_tag_from_column(self, column: str) -> str:
+        tags = {
+            "Показатель": "metric",
+            "Базовый метод": "baseline_method",
+            "Предложенный метод": "proposed_method",
+        }
+        return tags[column]
 
     def _build_comparison_export_frame(self, analysis: DatasetAnalysis) -> pd.DataFrame:
         time_frame = analysis.time_comparison.set_index("method")

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tkinter as tk
 import unittest
 from tkinter import ttk
 from unittest.mock import Mock, patch
+from xml.etree import ElementTree
 
 from pandas.core.frame import DataFrame
 
@@ -40,6 +42,15 @@ def build_sample_analysis():
         target_column="target",
         minimum_span=1.0,
     )
+
+
+def collect_notebooks(widget: tk.Widget) -> list[ttk.Notebook]:
+    notebooks = []
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Notebook):
+            notebooks.append(child)
+        notebooks.extend(collect_notebooks(child))
+    return notebooks
 
 
 class GuiTests(unittest.TestCase):
@@ -123,6 +134,25 @@ class GuiTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_dataset_tab_chart_sections_have_table_and_chart_subtabs(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            nested_tab_sets = [
+                [child.tab(tab_id, "text") for tab_id in child.tabs()]
+                for child in collect_notebooks(tab)
+                if [child.tab(tab_id, "text") for tab_id in child.tabs()] == ["Таблицы", "Графики"]
+            ]
+
+            self.assertEqual(len(nested_tab_sets), 3)
+        finally:
+            root.destroy()
+
     def test_dataset_tab_builds_comparison_export_table(self) -> None:
         analysis = build_sample_analysis()
         root = tk.Tk()
@@ -163,6 +193,60 @@ class GuiTests(unittest.TestCase):
             self.assertIn("Показатель;Базовый метод;Предложенный метод", exported)
             self.assertIn("Обработано записей;8;1", exported)
             self.assertIn("Таблица сравнения экспортирована", tab.status_var.get())
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_exports_comparison_table_to_json(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+            tab.export_format_var.set("JSON")
+
+            with TemporaryDirectory() as temp_dir:
+                output_path = Path(temp_dir) / "comparison.json"
+                with patch("src.gui.dataset_tab.filedialog.asksaveasfilename", return_value=str(output_path)) as dialog:
+                    tab.export_comparison_table()
+
+                exported = json.loads(output_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(dialog.call_args.kwargs["defaultextension"], ".json")
+            self.assertEqual(dialog.call_args.kwargs["initialfile"], "gui_synthetic_dataset_comparison.json")
+            self.assertEqual(exported[0]["Показатель"], "Обработано записей")
+            self.assertEqual(exported[0]["Базовый метод"], "8")
+            self.assertEqual(exported[0]["Предложенный метод"], "1")
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_exports_comparison_table_to_xml(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+            tab._apply_analysis(analysis)
+            tab.export_format_var.set("XML")
+
+            with TemporaryDirectory() as temp_dir:
+                output_path = Path(temp_dir) / "comparison.xml"
+                with patch("src.gui.dataset_tab.filedialog.asksaveasfilename", return_value=str(output_path)) as dialog:
+                    tab.export_comparison_table()
+
+                xml_root = ElementTree.fromstring(output_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(dialog.call_args.kwargs["defaultextension"], ".xml")
+            self.assertEqual(dialog.call_args.kwargs["initialfile"], "gui_synthetic_dataset_comparison.xml")
+            first_row = xml_root.find("row")
+            self.assertIsNotNone(first_row)
+            self.assertEqual(first_row.findtext("metric"), "Обработано записей")
+            self.assertEqual(first_row.findtext("baseline_method"), "8")
+            self.assertEqual(first_row.findtext("proposed_method"), "1")
         finally:
             root.destroy()
 
@@ -234,6 +318,10 @@ class GuiTests(unittest.TestCase):
             tab._apply_analysis(analysis)
 
             self.assertEqual(tab._default_export_filename(), "gui_synthetic_dataset_comparison.csv")
+            tab.export_format_var.set("JSON")
+            self.assertEqual(tab._default_export_filename(), "gui_synthetic_dataset_comparison.json")
+            tab.export_format_var.set("XML")
+            self.assertEqual(tab._default_export_filename(), "gui_synthetic_dataset_comparison.xml")
         finally:
             root.destroy()
 
