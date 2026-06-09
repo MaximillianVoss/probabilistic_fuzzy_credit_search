@@ -18,7 +18,7 @@ from pandas.api.types import is_numeric_dtype
 from matplotlib.figure import Figure
 
 from ..datasets.base import DatasetAnalysis
-from .backend import FigureCanvasTkAgg
+from .backend import FigureCanvasTkAgg, NavigationToolbar2Tk
 from .theme import ACCENT, GRID, PRIMARY, SECONDARY, SURFACE, TEXT
 
 
@@ -52,6 +52,11 @@ class DatasetTab(ttk.Frame):
         self.subtitle = subtitle
         self.analysis: DatasetAnalysis | None = None
         self.chart_canvases: dict[str, FigureCanvasTkAgg | None] = {}
+        self.chart_titles = {
+            "overview": "Обзор",
+            "quantization": "Квартильные группы",
+            "experiment": "Сравнение методов",
+        }
 
         self.status_var = tk.StringVar(value="Нажмите кнопку, чтобы загрузить данные и построить формы.")
         self.query_var = tk.StringVar(value="Запрос ещё не сформирован.")
@@ -600,9 +605,73 @@ class DatasetTab(ttk.Frame):
             child.destroy()
         self.chart_canvases[chart_key] = None
 
+    def _install_chart_canvas(self, host: ttk.Frame, chart_key: str, figure: Figure) -> None:
+        hint_bar = ttk.Frame(host, style="Card.TFrame")
+        hint_bar.pack(fill="x", pady=(0, 8))
+
+        hint_text = "Дважды щелкните по графику или нажмите кнопку, чтобы открыть его крупно."
+        ttk.Label(hint_bar, text=hint_text, style="Body.TLabel").pack(side="left", fill="x", expand=True)
+        ttk.Button(
+            hint_bar,
+            text="На весь экран",
+            command=lambda key=chart_key: self.open_chart_fullscreen(key),
+        ).pack(side="right", padx=(8, 0))
+
+        canvas = FigureCanvasTkAgg(figure, master=host)
+        canvas.draw()
+        widget = canvas.get_tk_widget()
+        widget.bind("<Double-Button-1>", lambda _event, key=chart_key: self.open_chart_fullscreen(key))
+        widget.pack(fill="both", expand=True)
+        self.chart_canvases[chart_key] = canvas
+
+    def open_chart_fullscreen(self, chart_key: str) -> None:
+        if self.analysis is None:
+            messagebox.showwarning("График", "Сначала постройте анализ.")
+            return
+        if chart_key not in self.chart_titles:
+            return
+
+        window = tk.Toplevel(self)
+        window.title(f"{self.title}: {self.chart_titles[chart_key]}")
+        window.configure(background=SURFACE)
+        window.minsize(900, 620)
+        window.bind("<Escape>", lambda _event: window.destroy())
+        try:
+            window.state("zoomed")
+        except tk.TclError:
+            window.geometry("1200x760")
+
+        toolbar_frame = ttk.Frame(window, style="App.TFrame", padding=(8, 8, 8, 0))
+        toolbar_frame.pack(fill="x")
+        ttk.Label(
+            toolbar_frame,
+            text="Esc - закрыть. Используйте панель для приближения и перемещения графика.",
+            style="Subtitle.TLabel",
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Button(toolbar_frame, text="Закрыть", command=window.destroy).pack(side="right")
+
+        figure = self._build_chart_figure(chart_key, self.analysis)
+        canvas = FigureCanvasTkAgg(figure, master=window)
+        canvas.draw()
+        NavigationToolbar2Tk(canvas, window, pack_toolbar=True)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.get_tk_widget().focus_set()
+
+    def _build_chart_figure(self, chart_key: str, analysis: DatasetAnalysis) -> Figure:
+        builders = {
+            "overview": self._build_overview_figure,
+            "quantization": self._build_quantization_figure,
+            "experiment": self._build_experiment_figure,
+        }
+        return builders[chart_key](analysis)
+
     def _render_overview_charts(self, analysis: DatasetAnalysis) -> None:
         self._clear_chart_host(self.overview_chart_host, "overview")
 
+        figure = self._build_overview_figure(analysis)
+        self._install_chart_canvas(self.overview_chart_host, "overview", figure)
+
+    def _build_overview_figure(self, analysis: DatasetAnalysis) -> Figure:
         figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
         axes = figure.subplots(2, 2)
         figure.subplots_adjust(left=0.07, right=0.98, top=0.84, bottom=0.12, hspace=0.55, wspace=0.30)
@@ -630,13 +699,15 @@ class DatasetTab(ttk.Frame):
         last_axis.set_facecolor("#fbfcfe")
         last_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        self.chart_canvases["overview"] = FigureCanvasTkAgg(figure, master=self.overview_chart_host)
-        self.chart_canvases["overview"].draw()
-        self.chart_canvases["overview"].get_tk_widget().pack(fill="both", expand=True)
+        return figure
 
     def _render_quantization_charts(self, analysis: DatasetAnalysis) -> None:
         self._clear_chart_host(self.quantization_chart_host, "quantization")
 
+        figure = self._build_quantization_figure(analysis)
+        self._install_chart_canvas(self.quantization_chart_host, "quantization", figure)
+
+    def _build_quantization_figure(self, analysis: DatasetAnalysis) -> Figure:
         figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
         axes = figure.subplots(1, len(analysis.feature_columns))
         if len(analysis.feature_columns) == 1:
@@ -659,13 +730,15 @@ class DatasetTab(ttk.Frame):
             axis.set_facecolor("#fbfcfe")
             axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        self.chart_canvases["quantization"] = FigureCanvasTkAgg(figure, master=self.quantization_chart_host)
-        self.chart_canvases["quantization"].draw()
-        self.chart_canvases["quantization"].get_tk_widget().pack(fill="both", expand=True)
+        return figure
 
     def _render_experiment_charts(self, analysis: DatasetAnalysis) -> None:
         self._clear_chart_host(self.experiment_chart_host, "experiment")
 
+        figure = self._build_experiment_figure(analysis)
+        self._install_chart_canvas(self.experiment_chart_host, "experiment", figure)
+
+    def _build_experiment_figure(self, analysis: DatasetAnalysis) -> Figure:
         figure = Figure(figsize=(11.5, 6.8), dpi=100, facecolor=SURFACE)
         axes = figure.subplots(1, 3)
         figure.subplots_adjust(left=0.07, right=0.98, top=0.80, bottom=0.18, wspace=0.32)
@@ -709,6 +782,4 @@ class DatasetTab(ttk.Frame):
         effect_axis.set_facecolor("#fbfcfe")
         effect_axis.grid(color=GRID, alpha=0.8, axis="y", linestyle="--", linewidth=0.7)
 
-        self.chart_canvases["experiment"] = FigureCanvasTkAgg(figure, master=self.experiment_chart_host)
-        self.chart_canvases["experiment"].draw()
-        self.chart_canvases["experiment"].get_tk_widget().pack(fill="both", expand=True)
+        return figure

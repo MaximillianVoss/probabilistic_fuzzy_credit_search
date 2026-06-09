@@ -53,6 +53,14 @@ def collect_notebooks(widget: tk.Widget) -> list[ttk.Notebook]:
     return notebooks
 
 
+def collect_widgets(widget: tk.Widget) -> list[tk.Widget]:
+    widgets = []
+    for child in widget.winfo_children():
+        widgets.append(child)
+        widgets.extend(collect_widgets(child))
+    return widgets
+
+
 class GuiTests(unittest.TestCase):
     def test_format_dataframe_formats_numeric_columns(self) -> None:
         frame = DataFrame({"x": [1.23456, None], "y": [1000, 2000], "label": ["a", None]})
@@ -150,6 +158,47 @@ class GuiTests(unittest.TestCase):
             ]
 
             self.assertEqual(len(nested_tab_sets), 3)
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_adds_fullscreen_controls_for_rendered_charts(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            tab._apply_analysis(analysis)
+            root.update_idletasks()
+
+            expand_buttons = [
+                widget
+                for widget in collect_widgets(tab)
+                if isinstance(widget, ttk.Button) and widget.cget("text") == "На весь экран"
+            ]
+
+            self.assertEqual(len(expand_buttons), 3)
+            for canvas in tab.chart_canvases.values():
+                self.assertIsNotNone(canvas)
+                self.assertTrue(canvas.get_tk_widget().bind("<Double-Button-1>"))
+        finally:
+            root.destroy()
+
+    def test_dataset_tab_fullscreen_without_analysis_shows_warning(self) -> None:
+        analysis = build_sample_analysis()
+        root = tk.Tk()
+        try:
+            configure_styles(ttk.Style(root))
+            notebook = ttk.Notebook(root)
+            notebook.pack()
+            tab = DatasetTab(notebook, "Title", "Subtitle", loader=lambda: analysis)
+
+            with patch("src.gui.dataset_tab.messagebox.showwarning") as showwarning:
+                tab.open_chart_fullscreen("overview")
+
+            showwarning.assert_called_once_with("График", "Сначала постройте анализ.")
         finally:
             root.destroy()
 
