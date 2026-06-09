@@ -1,5 +1,22 @@
 # probabilistic_fuzzy_credit_search
 
+<!-- codex-repo-note:start -->
+## Справка о репозитории / Repository note
+
+**RU:** исследовательский проект по вероятностному нечеткому поиску кредитных решений.
+
+**EN:** a research project for probabilistic fuzzy credit-decision search.
+
+**Статус / Status:** активный проект 2026 года; ожидает рефакторинга и переименования. / active 2026 project; refactoring and repository rename are pending.
+
+**Текущее имя / Current name:** `probabilistic_fuzzy_credit_search`
+
+**Плановое имя / Planned name:** `probabilistic-fuzzy-credit-search`
+
+**Topics:** `cleanup-pending`, `credit-scoring`, `fuzzy-logic`, `needs-rename`, `needs-review`, `probabilistic-models`, `python`, `status-active`, `type-research`
+<!-- codex-repo-note:end -->
+
+
 Стартовый проект под PyCharm по теме: ускорение неточного поиска в БД на основе вероятностных соотношений.
 
 В проекте есть GUI-приложение и пакет с аналитическими датасетами:
